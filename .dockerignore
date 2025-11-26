@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.python-version
+env/
+venv/
+.venv/
+
+# Environment files (SAFETY!)
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data and logs
+data/
+logs/
+*.log
+*.csv
+*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+docs/
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Makefile
+Makefile
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+best_games_urls.json

@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env.*
+!.env.example
+best_games_urls.json
+logs/

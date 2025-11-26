@@ -1,0 +1,6 @@
+beautifulsoup4==4.14.2
+lxml==6.0.2
+playwright==1.56.0
+psycopg2-binary==2.9.11
+requests==2.32.5
+sqlalchemy==2.0.44
