@@ -1,3 +1,4 @@
+import asyncio
 from data_ingestion.bgg_scraper import BGGDataExtractor, BGGTopGamesExtractor
 from datetime import datetime
 from postgre.postgre import DatabaseManager
@@ -13,41 +14,34 @@ import argparse
 def setup_logging(level: int = logging.INFO):
     """
     Docker-friendly logging configuration.
-    """
+
+    Args:
+        level (int): Logging level. Default is logging.INFO.
     
-    # Check if running in Docker
+    Returns:
+        None. Just configures logging.
+    """
     if os.path.exists('/.dockerenv'):
         logging.basicConfig(
             level=level,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             handlers=[logging.StreamHandler(sys.stdout)]
         )
-        logging.info("Docker logging configured - output to stdout")
     else:
-        # Local - log to file
         os.makedirs('logs', exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_filename = f"logs/bgg_scraper_{timestamp}.log"
-        
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler = logging.FileHandler(log_filename, encoding='utf-8')
         file_handler.setFormatter(formatter)
-        
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
-        
         root_logger = logging.getLogger()
         root_logger.setLevel(level)
-        
         for handler in root_logger.handlers[:]:
             root_logger.removeHandler(handler)
-        
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
-        logging.info(f"Local logging configured. Log file: {log_filename}")
 
 
 
@@ -89,7 +83,37 @@ def parse_arguments():
 
 
 
-def main(n: int = 50):  # Zaktualizowana domyślna wartość
+
+async def fetch_and_save(semaphore: asyncio.Semaphore, 
+                         extractor: BGGDataExtractor, 
+                         db: DatabaseManager, 
+                         name: str, 
+                         url: str) -> tuple[str, bool]:
+    """
+    Fetch game data and save to database with semaphore control.
+
+    Args:
+        semaphore: asyncio.Semaphore for concurrency control.
+        extractor: BGGDataExtractor instance.
+        db: DatabaseManager instance.
+        name: Name of the game.
+        url: URL of the game.
+    
+    Returns:
+        Tuple[str, bool]: Name and success status.
+    """
+    async with semaphore:
+        try:
+            game_data = await extractor.get_complete_game_data(url)
+            loop = asyncio.get_event_loop()
+            success = await loop.run_in_executor(None, db.save_flattened_game_data, game_data)
+            return name, success
+        except Exception as e:
+            return name, False
+
+
+
+async def main(n: int = 50):
     """
     Main function to extract top N games from BGG and store them in PostgreSQL database.
 
@@ -100,86 +124,47 @@ def main(n: int = 50):  # Zaktualizowana domyślna wartość
         None. Just performs the extraction and storage.
     """
     logger = logging.getLogger(__name__)
-    
-    logger.info(f"Starting BGG scraper for top {n} games")
-    
-    # Connect to DB with retry logic
-    logger.info("Connecting to database...")
+    logger.info(f"Starting async BGG scraper for top {n} games")
+
     db = DatabaseManager()
-    
-    # Create table
-    logger.info("Creating table...")
     db.create_flattened_games_table()
 
-    # Get top games
-    logger.info("Fetching top games...")
+    logger.info("Fetching top games URLs...")
     top_games = BGGTopGamesExtractor.get_urls(num_games=n)
-    bgg = BGGDataExtractor()
 
-    success_count = 0
-    failure_count = 0
+    extractor = await BGGDataExtractor.create()
+    semaphore = asyncio.Semaphore(5)  # max 5 parallel fetches
+    tasks = []
 
-    try:
-        for i, (name, url) in enumerate(top_games.items()):
-            try:
-                logger.info(f"Processing {i+1}/{len(top_games)}: {name}")
-                game_data = bgg.get_complete_game_data(url)
-                success = db.save_flattened_game_data(game_data)
-                if success:
-                    logger.info(f"Successfully processed: {name}")
-                    success_count += 1
-                else:
-                    logger.error(f"Failed to save: {name}")
-                    failure_count += 1
-                
-                # Rate limiting between games
-                if i < len(top_games) - 1:
-                    logger.debug("Rate limiting - waiting 2 seconds")
-                    time.sleep(2)
-                    
-            except Exception as e:
-                logger.error(f"Error processing {name}: {e}")
-                failure_count += 1
-                continue
-                
-        logger.info(f"Completed! Successfully processed {success_count}/{len(top_games)} games. Failures: {failure_count}")
-        
-    except Exception as e:
-        logger.critical(f"Critical error in main execution: {e}")
-        raise
-        
-    finally:
-        bgg.close()
-        logger.info("BGG data extractor closed")
+    for name, url in top_games.items():
+        tasks.append(fetch_and_save(semaphore, extractor, db, name, url))
+
+    results = await asyncio.gather(*tasks)
+
+    success_count = sum(1 for _, ok in results if ok)
+    failure_count = sum(1 for _, ok in results if not ok)
+
+    logger.info(f"Completed! Successfully processed {success_count}/{len(top_games)} games. Failures: {failure_count}")
+    await extractor.close()
+
 
 
 
 
 if __name__ == "__main__":
-    # Parse command line arguments
     args = parse_arguments()
-    
-    # Setup logging based on debug flag
     log_level = logging.DEBUG if args.debug else logging.INFO
     setup_logging(level=log_level)
-    
-    logger = logging.getLogger(__name__)
-    
+
+    if args.number <= 0:
+        logging.error("Number of games must be positive")
+        sys.exit(1)
+
     try:
-        # Validate input
-        if args.number <= 0:
-            logger.error("Number of games must be positive")
-            sys.exit(1)
-            
-        if args.number > 1000:
-            logger.warning(f"Extracting {args.number} games might take a long time")
-            
-        logger.info(f"Starting extraction of {args.number} games")
-        main(n=args.number)
-        
+        asyncio.run(main(n=args.number))
     except KeyboardInterrupt:
-        logger.info("Process interrupted by user")
+        logging.info("Process interrupted by user")
         sys.exit(0)
     except Exception as e:
-        logger.critical(f"Application failed: {e}")
+        logging.critical(f"Application failed: {e}")
         sys.exit(1)

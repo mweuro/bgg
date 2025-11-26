@@ -30,6 +30,10 @@ logs/
 *.csv
 *.json
 
+# Cache
+cache_html/
+persistent_profile/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,24 +1,17 @@
 import os
 import re
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import OperationalError
 import time
 from typing import List, Dict, Optional
-
-
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 
 class DatabaseManager:
     """
     Manages PostgreSQL database connections and operations for BGG game data.
     """
-    def __init__(self):
-        """
-        Initializes the DatabaseManager with a connection to the PostgreSQL database.
 
-        Returns:
-            None. Just sets up the connection.
-        """
+    def __init__(self):
         self.connection_string = (
             f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
             f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
@@ -27,16 +20,6 @@ class DatabaseManager:
         self._connect_with_retry()
 
     def _connect_with_retry(self, retries=10, delay=3):
-        """
-        Attempts to connect to the database with retry logic.
-
-        Args:
-            retries (int): Number of retry attempts.
-            delay (int): Delay in seconds between retries.
-        
-        Returns:
-            None
-        """
         for i in range(retries):
             try:
                 self.engine = create_engine(self.connection_string)
@@ -50,9 +33,6 @@ class DatabaseManager:
         raise Exception("Cannot connect to database after several retries")
 
     def create_flattened_games_table(self):
-        """
-        Creates the 'bgg' table in the database if it does not already exist.
-        """
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS public.bgg (
             id SERIAL PRIMARY KEY,
@@ -97,139 +77,118 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error creating table: {e}")
 
-    def _convert_list_to_string(self, data_list: List) -> str:
-        """
-        Convert a list of items to a comma-separated string.
-
-        Args:
-            data_list (List): List of items to convert.
-
-        Returns:
-            str: Comma-separated string of items.
-        """
-        return ", ".join(str(item) for item in data_list) if data_list else ""
+    def _convert_list_to_string(self, data_list: Optional[List]) -> str:
+        if not data_list:
+            return ""
+        return ", ".join(str(x).strip() for x in data_list if x)
 
     def _extract_bgg_id(self, url: str) -> Optional[int]:
-        """
-        Extracts the BGG ID from a given URL.
-
-        Args:
-            url (str): The URL to extract the BGG ID from.
-
-        Returns:
-            Optional[int]: The extracted BGG ID or None if not found.
-        """
         match = re.search(r'/boardgame/(\d+)/', url)
         return int(match.group(1)) if match else None
 
-    def save_flattened_game_data(self, game_data: Dict) -> bool:
-        """
-        Saves flattened game data into the 'bgg' table.
+    def save_flattened_game_data(self, game_data: Dict, retries=3, delay=2) -> bool:
+        for attempt in range(retries):
+            try:
+                bgg_id = self._extract_bgg_id(game_data["url"])
+                if not bgg_id:
+                    print("ERROR: Could not extract BGG ID")
+                    return False
 
-        Args:
-            game_data (Dict): Flattened game data dictionary.
-        
-        Returns:
-            bool: True if save was successful, False otherwise.
-        """
-        try:
-            bgg_id = self._extract_bgg_id(game_data["url"])
-            if not bgg_id:
-                print("ERROR: Could not extract BGG ID")
-                return False
+                flat = {
+                    'bgg_id': bgg_id,
+                    'title': game_data.get('title_and_year.title', 'Unknown'),
+                    'release_year': game_data.get('title_and_year.year'),
+                    'url': game_data['url'],
+                    'min_players': game_data.get('basic_info.min_players'),
+                    'max_players': game_data.get('basic_info.max_players'),
+                    'min_play_time': game_data.get('basic_info.min_play_time'),
+                    'max_play_time': game_data.get('basic_info.max_play_time'),
+                    'min_age': game_data.get('basic_info.min_age'),
+                    'avg_rating': game_data.get('stats.avg_rating'),
+                    'no_of_ratings': game_data.get('stats.no_of_ratings'),
+                    'std_deviation': game_data.get('stats.std_deviation'),
+                    'weight': game_data.get('stats.weight'),
+                    'comments': game_data.get('stats.comments'),
+                    'fans': game_data.get('stats.fans'),
+                    'page_views': game_data.get('stats.page_views'),
+                    'overall_rank': game_data.get('stats.overall_rank'),
+                    'strategy_rank': game_data.get('stats.strategy_rank'),
+                    'all_time_plays': game_data.get('stats.all_time_plays'),
+                    'this_month_plays': game_data.get('stats.this_month'),
+                    'own_count': game_data.get('stats.own'),
+                    'prev_owned_count': game_data.get('stats.prev_owned'),
+                    'for_trade_count': game_data.get('stats.for_trade'),
+                    'want_in_trade_count': game_data.get('stats.want_in_trade'),
+                    'wishlist_count': game_data.get('stats.wishlist'),
+                    'has_parts_count': game_data.get('stats.has_parts'),
+                    'want_parts_count': game_data.get('stats.want_parts'),
+                    'types': self._convert_list_to_string(game_data.get('types', [])),
+                    'categories': self._convert_list_to_string(game_data.get('categories_mechanics.categories', [])),
+                    'mechanics': self._convert_list_to_string(game_data.get('categories_mechanics.mechanics', [])),
+                }
 
-            flat = {
-                'bgg_id': bgg_id,
-                'title': game_data.get('title_and_year.title', 'Unknown'),
-                'release_year': game_data.get('title_and_year.year'),
-                'url': game_data['url'],
-                'min_players': game_data.get('basic_info.min_players'),
-                'max_players': game_data.get('basic_info.max_players'),
-                'min_play_time': game_data.get('basic_info.min_play_time'),
-                'max_play_time': game_data.get('basic_info.max_play_time'),
-                'min_age': game_data.get('basic_info.min_age'),
-                'avg_rating': game_data.get('stats.avg_rating'),
-                'no_of_ratings': game_data.get('stats.no_of_ratings'),
-                'std_deviation': game_data.get('stats.std_deviation'),
-                'weight': game_data.get('stats.weight'),
-                'comments': game_data.get('stats.comments'),
-                'fans': game_data.get('stats.fans'),
-                'page_views': game_data.get('stats.page_views'),
-                'overall_rank': game_data.get('stats.overall_rank'),
-                'strategy_rank': game_data.get('stats.strategy_rank'),
-                'all_time_plays': game_data.get('stats.all_time_plays'),
-                'this_month_plays': game_data.get('stats.this_month'),
-                'own_count': game_data.get('stats.own'),
-                'prev_owned_count': game_data.get('stats.prev_owned'),
-                'for_trade_count': game_data.get('stats.for_trade'),
-                'want_in_trade_count': game_data.get('stats.want_in_trade'),
-                'wishlist_count': game_data.get('stats.wishlist'),
-                'has_parts_count': game_data.get('stats.has_parts'),
-                'want_parts_count': game_data.get('stats.want_parts'),
-                'types': self._convert_list_to_string(game_data.get('types', [])),
-                'categories': self._convert_list_to_string(game_data.get('categories_mechanics.categories', [])),
-                'mechanics': self._convert_list_to_string(game_data.get('categories_mechanics.mechanics', [])),
-            }
+                sql = text("""
+                INSERT INTO public.bgg (
+                    bgg_id, title, release_year, url, min_players, max_players,
+                    min_play_time, max_play_time, min_age, avg_rating, no_of_ratings,
+                    std_deviation, weight, comments, fans, page_views, overall_rank,
+                    strategy_rank, all_time_plays, this_month_plays, own_count,
+                    prev_owned_count, for_trade_count, want_in_trade_count,
+                    wishlist_count, has_parts_count, want_parts_count, types,
+                    categories, mechanics
+                )
+                VALUES (
+                    :bgg_id, :title, :release_year, :url, :min_players, :max_players,
+                    :min_play_time, :max_play_time, :min_age, :avg_rating,
+                    :no_of_ratings, :std_deviation, :weight, :comments, :fans,
+                    :page_views, :overall_rank, :strategy_rank, :all_time_plays,
+                    :this_month_plays, :own_count, :prev_owned_count,
+                    :for_trade_count, :want_in_trade_count, :wishlist_count,
+                    :has_parts_count, :want_parts_count, :types, :categories,
+                    :mechanics
+                )
+                ON CONFLICT (bgg_id)
+                DO UPDATE SET
+                    title = EXCLUDED.title,
+                    release_year = EXCLUDED.release_year,
+                    min_players = EXCLUDED.min_players,
+                    max_players = EXCLUDED.max_players,
+                    min_play_time = EXCLUDED.min_play_time,
+                    max_play_time = EXCLUDED.max_play_time,
+                    min_age = EXCLUDED.min_age,
+                    avg_rating = EXCLUDED.avg_rating,
+                    no_of_ratings = EXCLUDED.no_of_ratings,
+                    std_deviation = EXCLUDED.std_deviation,
+                    weight = EXCLUDED.weight,
+                    comments = EXCLUDED.comments,
+                    fans = EXCLUDED.fans,
+                    page_views = EXCLUDED.page_views,
+                    overall_rank = EXCLUDED.overall_rank,
+                    strategy_rank = EXCLUDED.strategy_rank,
+                    all_time_plays = EXCLUDED.all_time_plays,
+                    this_month_plays = EXCLUDED.this_month_plays,
+                    own_count = EXCLUDED.own_count,
+                    prev_owned_count = EXCLUDED.prev_owned_count,
+                    for_trade_count = EXCLUDED.for_trade_count,
+                    want_in_trade_count = EXCLUDED.want_in_trade_count,
+                    wishlist_count = EXCLUDED.wishlist_count,
+                    has_parts_count = EXCLUDED.has_parts_count,
+                    want_parts_count = EXCLUDED.want_parts_count,
+                    types = EXCLUDED.types,
+                    categories = EXCLUDED.categories,
+                    mechanics = EXCLUDED.mechanics,
+                    updated_at = CURRENT_TIMESTAMP;
+                """)
 
-            sql = text("""
-            INSERT INTO public.bgg (
-                bgg_id, title, release_year, url, min_players, max_players,
-                min_play_time, max_play_time, min_age, avg_rating, no_of_ratings,
-                std_deviation, weight, comments, fans, page_views, overall_rank,
-                strategy_rank, all_time_plays, this_month_plays, own_count,
-                prev_owned_count, for_trade_count, want_in_trade_count,
-                wishlist_count, has_parts_count, want_parts_count, types,
-                categories, mechanics
-            )
-            VALUES (
-                :bgg_id, :title, :release_year, :url, :min_players, :max_players,
-                :min_play_time, :max_play_time, :min_age, :avg_rating,
-                :no_of_ratings, :std_deviation, :weight, :comments, :fans,
-                :page_views, :overall_rank, :strategy_rank, :all_time_plays,
-                :this_month_plays, :own_count, :prev_owned_count,
-                :for_trade_count, :want_in_trade_count, :wishlist_count,
-                :has_parts_count, :want_parts_count, :types, :categories,
-                :mechanics
-            )
-            ON CONFLICT (bgg_id)
-            DO UPDATE SET
-                title = EXCLUDED.title,
-                release_year = EXCLUDED.release_year,
-                min_players = EXCLUDED.min_players,
-                max_players = EXCLUDED.max_players,
-                min_play_time = EXCLUDED.min_play_time,
-                max_play_time = EXCLUDED.max_play_time,
-                min_age = EXCLUDED.min_age,
-                avg_rating = EXCLUDED.avg_rating,
-                no_of_ratings = EXCLUDED.no_of_ratings,
-                std_deviation = EXCLUDED.std_deviation,
-                weight = EXCLUDED.weight,
-                comments = EXCLUDED.comments,
-                fans = EXCLUDED.fans,
-                page_views = EXCLUDED.page_views,
-                overall_rank = EXCLUDED.overall_rank,
-                strategy_rank = EXCLUDED.strategy_rank,
-                all_time_plays = EXCLUDED.all_time_plays,
-                this_month_plays = EXCLUDED.this_month_plays,
-                own_count = EXCLUDED.own_count,
-                prev_owned_count = EXCLUDED.prev_owned_count,
-                for_trade_count = EXCLUDED.for_trade_count,
-                want_in_trade_count = EXCLUDED.want_in_trade_count,
-                wishlist_count = EXCLUDED.wishlist_count,
-                has_parts_count = EXCLUDED.has_parts_count,
-                want_parts_count = EXCLUDED.want_parts_count,
-                types = EXCLUDED.types,
-                categories = EXCLUDED.categories,
-                mechanics = EXCLUDED.mechanics,
-                updated_at = CURRENT_TIMESTAMP;
-            """)
+                with self.engine.begin() as conn:
+                    conn.execute(sql, flat)
 
-            with self.engine.begin() as conn:
-                conn.execute(sql, flat)
+                print(f"Saved / updated: {flat['title']}")
+                return True
 
-            print(f"Saved / updated: {flat['title']}")
-            return True
-
-        except Exception as e:
-            print(f"Error saving game: {e}")
-            return False
+            except Exception as e:
+                print(f"Attempt {attempt+1} failed: {e}")
+                if attempt < retries - 1:
+                    time.sleep(delay)
+                else:
+                    return False
