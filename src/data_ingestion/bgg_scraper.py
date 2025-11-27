@@ -121,7 +121,7 @@ class BGGDataExtractor:
     async def create(cls, 
                      headless: bool = True, 
                      timeout: int = 30000, 
-                     browser_args: Optional[List[str]] = None) -> "BGGDataExtractorAsync":
+                     browser_args: Optional[List[str]] = None) -> "BGGDataExtractor":
         """
         Async factory to create extractor (because __init__ cannot be async).
 

@@ -23,9 +23,34 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME}
+      NUMBER_OF_GAMES: ${NUMBER_OF_GAMES}
+      NO_SCRAPER: ${NO_SCRAPER:-0}
     volumes:
       - ./logs:/app/logs
-    command: python src/main.py -n ${NUMBER_OF_GAMES:-50}
+    command: >
+      sh -c "
+        if [ \"$NO_SCRAPER\" = \"1\" ]; then
+          echo 'Scraper disabled — starting container only';
+          tail -f /dev/null;
+        else
+          echo 'Starting scraper...';
+          python src/main.py -n ${NUMBER_OF_GAMES:-50};
+        fi
+      "
+  
+  pipeline:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+    command: python src/pipeline/extract_db.py
+    volumes:
+      - .:/app
 
 volumes:
   pgdata:

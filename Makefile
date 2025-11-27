@@ -1,59 +1,38 @@
-# Load environment variables from .env file if it exists
+# Load env
 ifneq (,$(wildcard ./.env))
     include .env
     export
 endif
 
-# Phony targets
-.PHONY: help run stop clean logs enter-db
+.PHONY: help run infra stop clean logs enter-db
 
-
-#  HELP COMMAND
+N ?= 50
 
 help:
-	@echo "BGG Scraper - Docker Compose Management"
-	@echo ""
-	@echo "Usage:"
-	@echo "  make run [N=number]    Start scraper for top N games (default: 50)"
-	@echo "  make stop              Stop all services"
-	@echo "  make clean             Stop and remove all containers and volumes"
-	@echo "  make logs              Show logs from running services"
-	@echo "  make help              Show this help message"
-	@echo ""
-	@echo "Examples:"
-	@echo "  make run           # Extract top 50 games"
-	@echo "  make run N=20      # Extract top 20 games"
-	@echo "  make run N=100     # Extract top 100 games"
-
-
-# Default arguments
-N ?= 50
-DB_USER ?= myuser
-DB_NAME ?= bgg
-
-
-#  CONTAINER MANAGEMENT COMMANDS
+	@echo "Commands:"
+	@echo "  make run N=50      # run scraper for top N games"
+	@echo "  make infra         # start containers WITHOUT running scraper"
+	@echo "  make stop          # stop containers"
+	@echo "  make clean         # remove all containers & volumes"
+	@echo "  make logs          # show logs"
+	@echo "  make enter-db      # enter postgres"
 
 run:
-	@echo "Starting BGG scraper for top $(N) games..."
-	@echo "This might take a while..."
-	@NUMBER_OF_GAMES=$(N) docker-compose up --build
+	@echo "Starting scraper for top $(N) games..."
+	@NUMBER_OF_GAMES=$(N) NO_SCRAPER=0 docker-compose up --build
+
+infra:
+	@echo "Starting infrastructure WITHOUT scraper..."
+	@NO_SCRAPER=1 docker-compose up -d
 
 stop:
-	@echo "Stopping services..."
 	@docker-compose down
 
 clean:
-	@echo "Cleaning up containers and volumes..."
 	@docker-compose down -v
 
 logs:
 	@docker-compose logs -f
 
-
-
-# DATABASE MANAGEMENT COMMANDS
-
 enter-db:
-	@echo "Entering PostgreSQL database container..."
 	@docker exec -it bgg_postgres psql -U $(DB_USER) -d $(DB_NAME)
