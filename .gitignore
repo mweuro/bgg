@@ -12,3 +12,9 @@ logs/
 # Cache
 cache_html/
 persistent_profile/
+
+# Data
+data/exports/*.parquet
+data/processed/*.parquet
+
+*.ipynb

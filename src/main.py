@@ -1,170 +1,144 @@
 import asyncio
-from data_ingestion.bgg_scraper import BGGDataExtractor, BGGTopGamesExtractor
-from datetime import datetime
-from postgre.postgre import DatabaseManager
 import logging
 import os
+import random
 import sys
-import time
 import argparse
+from typing import List
+
+from logger import get_logger
+from models import Game
+from scraper.bgg_client import fetch_game_data
+from db.engine import create_db_engine
+from db.schema import create_games_table
+from db.repository import batch_save_games
 
 
+# =========================
+# LOGGER
+# =========================
+
+logger = get_logger(__name__)
 
 
-def setup_logging(level: int = logging.INFO):
-    """
-    Docker-friendly logging configuration.
-
-    Args:
-        level (int): Logging level. Default is logging.INFO.
-    
-    Returns:
-        None. Just configures logging.
-    """
-    if os.path.exists('/.dockerenv'):
-        logging.basicConfig(
-            level=level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[logging.StreamHandler(sys.stdout)]
-        )
-    else:
-        os.makedirs('logs', exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"logs/bgg_scraper_{timestamp}.log"
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        file_handler = logging.FileHandler(log_filename, encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(level)
-        for handler in root_logger.handlers[:]:
-            root_logger.removeHandler(handler)
-        root_logger.addHandler(file_handler)
-        root_logger.addHandler(console_handler)
-
-
-
+# =========================
+# CLI ARGUMENTS
+# =========================
 
 def parse_arguments():
-    """
-    Parse command line arguments.
-    
-    Returns:
-        argparse.Namespace: Parsed arguments.
-    """
     parser = argparse.ArgumentParser(
-        description="Extract top board games from BoardGameGeek and store in PostgreSQL",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-        Examples:
-            python src/main.py              # Extract top 50 games (default)
-            python src/main.py -n 20        # Extract top 20 games
-            python src/main.py --number 100 # Extract top 100 games
-        """
+        description="BGG async scraper from TXT IDs --> PostgreSQL (batch insert)"
     )
-    
+
     parser.add_argument(
-        '-n', '--number',
+        "--limit",
         type=int,
-        default=50,
-        help='Number of top games to extract (default: 50)',
-        metavar='N'
+        default=None,
+        help="Limit how many IDs to process"
     )
-    
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Enable debug logging'
-    )
-    
+
     return parser.parse_args()
 
 
+# =========================
+# LOAD IDS FROM TXT
+# =========================
+
+def load_game_ids_from_txt(limit: int | None = None) -> List[int]:
+    path = "data/id.txt"
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"File not found: {path}")
+
+    with open(path, "r", encoding="utf-8") as f:
+        ids = [int(line.strip()) for line in f if line.strip().isdigit()]
+
+    return ids[:limit] if limit else ids
 
 
+# =========================
+# ASYNC WORKER
+# =========================
 
-async def fetch_and_save(semaphore: asyncio.Semaphore, 
-                         extractor: BGGDataExtractor, 
-                         db: DatabaseManager, 
-                         name: str, 
-                         url: str) -> tuple[str, bool]:
+
+async def fetch_with_semaphore(semaphore: asyncio.Semaphore, 
+                               game_id: int) -> tuple[int, Game | None]:
     """
-    Fetch game data and save to database with semaphore control.
+    Fetch game data with semaphore to limit concurrency.
 
     Args:
-        semaphore: asyncio.Semaphore for concurrency control.
-        extractor: BGGDataExtractor instance.
-        db: DatabaseManager instance.
-        name: Name of the game.
-        url: URL of the game.
+        semaphore (asyncio.Semaphore): Semaphore to limit concurrent requests.
+        game_id (int): BGG game ID.
     
     Returns:
-        Tuple[str, bool]: Name and success status.
+        tuple[int, Game | None]: Tuple of game ID and fetched Game object or None.
     """
     async with semaphore:
-        try:
-            game_data = await extractor.get_complete_game_data(url)
-            loop = asyncio.get_event_loop()
-            success = await loop.run_in_executor(None, db.save_flattened_game_data, game_data)
-            return name, success
-        except Exception as e:
-            return name, False
+        await asyncio.sleep(10.0) # Otherwise http 429 Too Many Requests
+        return game_id, await fetch_game_data(game_id)
 
 
+# =========================
+# MAIN PIPELINE
+# =========================
 
-async def main(n: int = 50):
+async def main(limit: int | None) -> None:
     """
-    Main function to extract top N games from BGG and store them in PostgreSQL database.
+    Main async pipeline to scrape BGG game data from TXT IDs and save to PostgreSQL.
 
     Args:
-        n (int): Number of top games to extract. Default is 50.
+        limit (int | None): Limit how many IDs to process.
     
     Returns:
-        None. Just performs the extraction and storage.
+        None
     """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Starting async BGG scraper for top {n} games")
+    logger.info("Starting async BGG scraper from TXT IDs")
 
-    db = DatabaseManager()
-    db.create_flattened_games_table()
+    # 1. DB
+    engine = create_db_engine()
+    create_games_table(engine)
 
-    logger.info("Fetching top games URLs...")
-    top_games = BGGTopGamesExtractor.get_urls(num_games=n)
+    # 2. LOAD IDS
+    game_ids = load_game_ids_from_txt(limit)
+    logger.info(f"Loaded {len(game_ids)} game IDs")
 
-    extractor = await BGGDataExtractor.create()
-    semaphore = asyncio.Semaphore(5)  # max 5 parallel fetches
-    tasks = []
+    # 3. ASYNC SCRAPING
+    semaphore = asyncio.Semaphore(5)
 
-    for name, url in top_games.items():
-        tasks.append(fetch_and_save(semaphore, extractor, db, name, url))
+    tasks = [
+        fetch_with_semaphore(semaphore, game_id)
+        for game_id in game_ids
+    ]
 
     results = await asyncio.gather(*tasks)
 
-    success_count = sum(1 for _, ok in results if ok)
-    failure_count = sum(1 for _, ok in results if not ok)
+    # 4. FILTER RESULTS
+    payload = [
+        (game_id, game)
+        for game_id, game in results
+        if game is not None
+    ]
 
-    logger.info(f"Completed! Successfully processed {success_count}/{len(top_games)} games. Failures: {failure_count}")
-    await extractor.close()
+    logger.info(f"Successfully fetched {len(payload)}/{len(game_ids)} games")
+
+    # 5. BATCH INSERT
+    batch_save_games(engine, payload, batch_size=100)
+
+    logger.info("DONE")
 
 
-
-
+# =========================
+# ENTRYPOINT
+# =========================
 
 if __name__ == "__main__":
     args = parse_arguments()
-    log_level = logging.DEBUG if args.debug else logging.INFO
-    setup_logging(level=log_level)
-
-    if args.number <= 0:
-        logging.error("Number of games must be positive")
-        sys.exit(1)
 
     try:
-        asyncio.run(main(n=args.number))
+        asyncio.run(main(limit=args.limit))
     except KeyboardInterrupt:
-        logging.info("Process interrupted by user")
+        logger.info("Process interrupted by user")
         sys.exit(0)
     except Exception as e:
-        logging.critical(f"Application failed: {e}")
+        logger.exception("Application failed")
         sys.exit(1)
