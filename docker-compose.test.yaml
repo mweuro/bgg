@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  postgres_test:
+    image: postgres:15
+    container_name: bgg_postgres_test
+    env_file: .env
+    environment:
+      POSTGRES_DB: bgg_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d bgg_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  bgg_tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      postgres_test:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      POSTGRES_DB: bgg_test
+      POSTGRES_HOST: postgres_test
+    command: python -m pytest -v
+
+volumes:
+  pgdata_test:

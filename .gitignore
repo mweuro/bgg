@@ -18,3 +18,4 @@ data/exports/*.parquet
 data/processed/*.parquet
 
 *.ipynb
+.pytest_cache/

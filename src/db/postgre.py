@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 
-from logger import get_logger
-from models import Game
+from src.logger import get_logger
+from src.models import Game
 
 
 # =========================
@@ -20,7 +20,9 @@ from models import Game
 logger = get_logger("database")
 load_dotenv()
 
-
+# =========================
+# DATABASE MANAGER
+# =========================
 
 class DatabaseManager:
     """

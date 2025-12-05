@@ -1,17 +1,15 @@
 import asyncio
-import logging
 import os
-import random
 import sys
 import argparse
 from typing import List
 
-from logger import get_logger
-from models import Game
-from scraper.bgg_client import fetch_game_data
-from db.engine import create_db_engine
-from db.schema import create_games_table
-from db.repository import batch_save_games
+from src.logger import get_logger
+from src.models import Game
+from src.scraper.bgg_client import fetch_game_data
+from src.db.engine import create_db_engine
+from src.db.schema import create_games_table
+from src.db.repository import batch_save_games
 
 
 # =========================

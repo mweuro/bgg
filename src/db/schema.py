@@ -3,11 +3,18 @@
 # =========================
 
 from sqlalchemy import text, create_engine
-from logger import get_logger
+from src.logger import get_logger
 
+# =========================
+# LOGGER
+# =========================
 
 logger = get_logger("db-schema")
 
+
+# =========================
+# CREATE GAMES TABLE
+# =========================
 
 def create_games_table(engine: create_engine) -> None:
     """

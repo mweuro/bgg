@@ -8,9 +8,9 @@ import asyncio
 import aiohttp
 import xml.etree.ElementTree as ET
 
-from config import BASE_URL, HEADERS
-from models import Game
-from logger import get_logger
+from src.config import BASE_URL, HEADERS
+from src.models import Game
+from src.logger import get_logger
 
 
 # =================

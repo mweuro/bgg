@@ -7,10 +7,18 @@ import os
 import time
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
-from logger import get_logger
+
+from src.logger import get_logger
+
+# =========================
+# LOGGER
+# =========================
 
 logger = get_logger("db-engine")
 
+# =========================
+# ENGINE CREATION
+# =========================
 
 def create_db_engine(retries: int = 10, delay: int = 3) -> create_engine:
     """

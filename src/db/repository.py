@@ -2,15 +2,21 @@
 # DB REPOSITORY
 # =========================
 
-import time
 from typing import List, Dict
 from sqlalchemy import text
-from logger import get_logger
-from models import Game
 
+from src.logger import get_logger
+from src.models import Game
+
+# =========================
+# LOGGER
+# =========================
 
 logger = get_logger("db-repository")
 
+# =========================
+# HELPERS
+# =========================
 
 def _list_to_str(values: List[str]) -> str:
     """
@@ -24,6 +30,9 @@ def _list_to_str(values: List[str]) -> str:
     """
     return ", ".join(v.strip() for v in values if v)
 
+# =========================
+# BATCH SAVE GAMES
+# =========================
 
 def batch_save_games(
     engine,

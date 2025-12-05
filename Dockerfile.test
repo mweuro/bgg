@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 1. Zależności
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install pytest pytest-mock
+
+# 2. Kod aplikacji + testy
+COPY src ./src
+COPY tests ./tests
+
+# 3. Ścieżka importów
+ENV PYTHONPATH=/app
+
+# 4. Domyślna komenda = testy
+CMD ["python", "-m", "pytest", "-v"]
